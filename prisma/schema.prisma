@@ -1,0 +1,255 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts           Account[]
+  sessions           Session[]
+  communities        CommunityMember[]
+  createdCommunities Community[]       @relation("CommunityCreator")
+  createdMarkets     Market[]          @relation("MarketCreator")
+  orders             Order[]
+  positions          Position[]
+  trades             Trade[]
+  messages           Message[]
+  upvotes            Upvote[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Community {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  isPublic    Boolean   @default(true)
+  inviteCode  String?   @unique
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  creatorId   String
+
+  creator User @relation("CommunityCreator", fields: [creatorId], references: [id])
+  members CommunityMember[]
+  markets Market[]
+  messages Message[]
+
+  @@map("communities")
+}
+
+model CommunityMember {
+  id          String   @id @default(cuid())
+  userId      String
+  communityId String
+  role        MemberRole @default(MEMBER)
+  joinedAt    DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, communityId])
+  @@map("community_members")
+}
+
+enum MemberRole {
+  ADMIN
+  MEMBER
+}
+
+model Market {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  communityId String
+  creatorId   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  closesAt    DateTime?
+  status      MarketStatus @default(OPEN)
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  creator   User      @relation("MarketCreator", fields: [creatorId], references: [id])
+  outcomes  Outcome[]
+  upvotes   Upvote[]
+
+  @@map("markets")
+}
+
+enum MarketStatus {
+  OPEN
+  CLOSED
+  RESOLVED
+}
+
+model Outcome {
+  id          String   @id @default(cuid())
+  marketId    String
+  name        String
+  description String?
+  probability Float    @default(0.5)
+  resolved    Boolean  @default(false)
+  result      Boolean? // null = not resolved, true = YES, false = NO
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  market    Market     @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  orders    Order[]
+  positions Position[]
+  trades    Trade[]
+
+  @@map("outcomes")
+}
+
+model Order {
+  id         String      @id @default(cuid())
+  userId     String
+  outcomeId  String
+  side       OrderSide
+  type       OrderType
+  quantity   Float
+  price      Float       // probability for YES, 1-probability for NO
+  filled     Float       @default(0)
+  status     OrderStatus @default(OPEN)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  expiresAt  DateTime?
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outcome Outcome @relation(fields: [outcomeId], references: [id], onDelete: Cascade)
+  trades  Trade[]
+
+  @@index([outcomeId, status, price])
+  @@map("orders")
+}
+
+enum OrderSide {
+  YES
+  NO
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+}
+
+enum OrderStatus {
+  OPEN
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+}
+
+model Position {
+  id        String   @id @default(cuid())
+  userId    String
+  outcomeId String
+  side      OrderSide
+  quantity  Float
+  avgPrice  Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outcome Outcome @relation(fields: [outcomeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, outcomeId, side])
+  @@map("positions")
+}
+
+model Trade {
+  id          String   @id @default(cuid())
+  buyOrderId  String
+  sellOrderId String
+  outcomeId   String
+  buyerId     String
+  sellerId    String
+  quantity    Float
+  price       Float
+  createdAt   DateTime @default(now())
+
+  buyOrder  Order   @relation(fields: [buyOrderId], references: [id])
+  outcome   Outcome @relation(fields: [outcomeId], references: [id], onDelete: Cascade)
+  buyer     User    @relation(fields: [buyerId], references: [id])
+
+  @@map("trades")
+}
+
+model Message {
+  id          String   @id @default(cuid())
+  content     String
+  userId      String
+  communityId String
+  createdAt   DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+model Upvote {
+  id        String   @id @default(cuid())
+  userId    String
+  marketId  String
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, marketId])
+  @@map("upvotes")
+}
